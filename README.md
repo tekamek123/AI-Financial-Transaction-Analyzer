@@ -30,7 +30,7 @@ An intelligent system that analyzes bank transactions and detects suspicious or 
 ## 🛠 Tech Stack
 
 ### Frontend
-- **React / Next.js**: Modern web framework
+- **Next.js**: Modern web framework
 - **Recharts / Chart.js**: Interactive data visualization
 - **Tailwind CSS**: Styling and UI components
 

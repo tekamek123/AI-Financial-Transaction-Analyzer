@@ -8,11 +8,22 @@ from collections import defaultdict
 
 from app.models.transaction import Transaction, Alert, AnalysisJob
 from app.services.transaction_service import TransactionService
+from app.ml.model_manager import ModelManager
+from app.ml.config import MLConfig
 
 class AIAnalysisService:
     def __init__(self, db: Session):
         self.db = db
         self.transaction_service = TransactionService(db)
+        self.ml_config = MLConfig()
+        self.model_manager = ModelManager(self.ml_config)
+        
+        # Try to load latest models
+        try:
+            self.model_manager.load_latest_models()
+        except Exception as e:
+            print(f"Could not load ML models: {e}")
+            print("Models will be trained on first analysis")
 
     async def analyze_transactions_async(
         self, 
@@ -41,23 +52,36 @@ class AIAnalysisService:
             
             df = pd.DataFrame(transaction_data)
             
-            # Perform AI analysis
-            analysis_results = await self._perform_ai_analysis(df)
+            # Check if models are trained, if not train them
+            if not self.model_manager.ensemble_model.is_trained:
+                # Get historical data for training
+                historical_data = await self._get_training_data()
+                if len(historical_data) >= self.ml_config.MIN_TRAINING_SAMPLES:
+                    print("Training ML models...")
+                    self.model_manager.train_all_models(historical_data)
+                else:
+                    # Fall back to rule-based analysis
+                    analysis_results = await self._perform_rule_based_analysis(df)
+                    await self._update_transactions_with_analysis(analysis_results)
+                    return
+            
+            # Perform ML analysis
+            analysis_results = self.model_manager.analyze_transactions(df, 'ensemble')
             
             # Update transactions with results
             suspicious_count = 0
-            for result in analysis_results:
+            for index, result in analysis_results.iterrows():
                 await self.transaction_service.update_transaction_risk_analysis(
                     transaction_id=result['transaction_id'],
-                    risk_score=result['risk_score'],
-                    fraud_probability=result['fraud_probability'],
-                    anomaly_score=result['anomaly_score'],
-                    ai_explanation=result['explanation']
+                    risk_score=result['ensemble_risk_score'],
+                    fraud_probability=result['ensemble_probability'] * 100,
+                    anomaly_score=result['if_anomaly_score'] * 100,
+                    ai_explanation=result['final_explanation']
                 )
                 
                 # Create alerts if suspicious
-                if result['risk_score'] > 70:
-                    await self._create_alerts_for_transaction(result)
+                if result['ensemble_risk_score'] > 70:
+                    await self._create_alerts_for_ml_result(result)
                     suspicious_count += 1
             
             # Update job completion
@@ -440,32 +464,86 @@ class AIAnalysisService:
         
         return explanation
 
-    async def _create_alerts_for_transaction(self, analysis_result: Dict[str, Any]):
-        """Create alerts based on analysis results"""
-        transaction_id = analysis_result['transaction_id']
-        risk_factors = analysis_result['risk_factors']
+    async def _get_training_data(self) -> pd.DataFrame:
+        """Get historical data for training ML models"""
+        # Get last 90 days of transactions
+        start_date = datetime.utcnow() - timedelta(days=90)
+        
+        transactions = self.db.query(Transaction).filter(
+            Transaction.timestamp >= start_date
+        ).all()
+        
+        if not transactions:
+            return pd.DataFrame()
+        
+        data = []
+        for t in transactions:
+            data.append({
+                'transaction_id': t.transaction_id,
+                'amount': t.amount,
+                'timestamp': t.timestamp,
+                'merchant': t.merchant,
+                'category': t.category,
+                'account_id': t.account_id
+            })
+        
+        return pd.DataFrame(data)
+    
+    async def _perform_rule_based_analysis(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Fallback rule-based analysis when ML models are not available"""
+        results = df.copy()
+        results['ensemble_risk_score'] = 0.0
+        results['ensemble_probability'] = 0.0
+        results['final_explanation'] = "Rule-based analysis: Insufficient data for ML models"
+        
+        return results
+    
+    async def _update_transactions_with_analysis(self, analysis_results: pd.DataFrame):
+        """Update transactions with analysis results"""
+        for index, result in analysis_results.iterrows():
+            await self.transaction_service.update_transaction_risk_analysis(
+                transaction_id=result['transaction_id'],
+                risk_score=result['ensemble_risk_score'],
+                fraud_probability=result['ensemble_probability'],
+                anomaly_score=0.0,
+                ai_explanation=result['final_explanation']
+            )
+    
+    async def _create_alerts_for_ml_result(self, result: pd.Series):
+        """Create alerts based on ML analysis results"""
+        transaction_id = result['transaction_id']
+        risk_score = result['ensemble_risk_score']
         
         # Create specific alerts based on risk factors
-        for factor in risk_factors:
-            alert_type = "general"
-            severity = "medium"
-            
-            if "amount" in factor.lower():
-                alert_type = "high_amount"
-                severity = "high" if "large" in factor.lower() else "medium"
-            elif "time" in factor.lower():
-                alert_type = "unusual_time"
-                severity = "medium"
-            elif "frequency" in factor.lower():
-                alert_type = "frequency"
-                severity = "high"
-            elif "merchant" in factor.lower():
-                alert_type = "unknown_merchant"
-                severity = "medium"
-            
+        if risk_score >= 80:
             await self.transaction_service.create_alert(
                 transaction_id=transaction_id,
-                alert_type=alert_type,
-                severity=severity,
-                message=f"Suspicious activity detected: {factor}"
+                alert_type="critical_risk",
+                severity="critical",
+                message=f"Critical risk detected: {result['final_explanation']}"
             )
+        elif risk_score >= 60:
+            await self.transaction_service.create_alert(
+                transaction_id=transaction_id,
+                alert_type="high_risk",
+                severity="high",
+                message=f"High risk detected: {result['final_explanation']}"
+            )
+        
+        # Model-specific alerts
+        if result.get('if_anomaly_score', 0) > 0.7:
+            await self.transaction_service.create_alert(
+                transaction_id=transaction_id,
+                alert_type="isolation_forest_anomaly",
+                severity="medium",
+                message="Isolation Forest detected strong anomaly"
+            )
+        
+        if result.get('km_is_outlier', False):
+            await self.transaction_service.create_alert(
+                transaction_id=transaction_id,
+                alert_type="clustering_outlier",
+                severity="medium",
+                message="K-Means clustering identified transaction as outlier"
+            )
+        
