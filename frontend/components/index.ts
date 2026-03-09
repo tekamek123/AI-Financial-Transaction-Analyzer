@@ -12,6 +12,11 @@ export { default as TransactionTrendsChart } from "./TransactionTrendsChart";
 export { default as FileUpload } from "./FileUpload";
 export { default as TransactionDetailModal } from "./TransactionDetailModal";
 
+// Bonus feature components
+export { default as AIExplanationPanel } from "./AIExplanationPanel";
+export { default as TransactionCategorizer } from "./TransactionCategorizer";
+export { default as FraudProbabilityCalculator } from "./FraudProbabilityCalculator";
+
 // Chart components
 export {
   RiskTrendsChart,
@@ -30,13 +35,7 @@ export {
   TableSkeleton,
 } from "./LoadingSpinner";
 export { default as ErrorBoundary, useErrorHandler } from "./ErrorBoundary";
-export {
-  default as Toast,
-  ToastContainer,
-  ToastProvider,
-  useToast,
-  useToastHelpers,
-} from "./Toast";
+export { default as Toast, ToastContainer, ToastProvider } from "./Toast";
 
 // Re-export for easier imports
 export * from "./Dashboard";
@@ -49,6 +48,9 @@ export * from "./RiskDistributionChart";
 export * from "./TransactionTrendsChart";
 export * from "./FileUpload";
 export * from "./TransactionDetailModal";
+export * from "./AIExplanationPanel";
+export * from "./TransactionCategorizer";
+export * from "./FraudProbabilityCalculator";
 export * from "./charts";
 export * from "./LoadingSpinner";
 export * from "./ErrorBoundary";
