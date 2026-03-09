@@ -12,6 +12,16 @@ export { default as TransactionTrendsChart } from "./TransactionTrendsChart";
 export { default as FileUpload } from "./FileUpload";
 export { default as TransactionDetailModal } from "./TransactionDetailModal";
 
+// Chart components
+export {
+  RiskTrendsChart,
+  MerchantAnalysisChart,
+  CategoryDistributionChart,
+  TimeBasedPatternsChart,
+  SuspiciousPatternsChart,
+  HeatmapChart,
+} from "./charts";
+
 // Utility components
 export {
   default as LoadingSpinner,
@@ -39,6 +49,7 @@ export * from "./RiskDistributionChart";
 export * from "./TransactionTrendsChart";
 export * from "./FileUpload";
 export * from "./TransactionDetailModal";
+export * from "./charts";
 export * from "./LoadingSpinner";
 export * from "./ErrorBoundary";
 export * from "./Toast";
